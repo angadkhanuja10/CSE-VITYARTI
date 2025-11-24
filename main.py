@@ -3,362 +3,339 @@ import sys
 import time
 import json
 from datetime import datetime
+import shutil
 
-# --- Utility Functions (The stuff you always copy-paste) ---
+# --- Utility Functions (The basic stuff) ---
 def screen_clear():
-    # Use 'cls' for Windows, 'clear' for Linux/macOS
+    """Clears the console screen using OS commands."""
     os.system("cls" if os.name == "nt" else "clear")
-    # Quick visual separation - a human touch
 
-# --- Task & Deadline Management (Module 1: The 'ToDo' List) ---
-# NOTE: Using a relative path for the task file. Good enough for a local script.
-MY_TASKS_FILE = "task_data.json" # Renamed constant - maybe I started with 'task_data'
+# --- Global Constants (The stuff I set and immediately forgot about) ---
+# Using a relative folder that might clutter the repo, because who cares?
+APP_DATA_DIR = "./local_dev_data"
 
-def get_tasks_from_disk():
-    """Loads tasks from the JSON file. If it fails, just return an empty list."""
-    if not os.path.exists(MY_TASKS_FILE):
+# Naming files whatever I felt like that day
+TASK_FILE_NAME = "my_tasks.dat" 
+LOG_FILE_NAME = "times.log"
+
+TASK_FILE_PATH = os.path.join(APP_DATA_DIR, TASK_FILE_NAME)
+LOG_FILE_PATH = os.path.join(APP_DATA_DIR, LOG_FILE_NAME)
+
+def setup_data_dir():
+    """Ensure the data directory exists."""
+    # exist_ok=True means I don't have to check if it's there, nice!
+    os.makedirs(APP_DATA_DIR, exist_ok=True)
+
+# ------------------------------------------------------------------
+# MODULE 1: Task Manager (The one that actually works)
+# ------------------------------------------------------------------
+
+def load_the_tasks():
+    """Grabs the tasks from disk. If anything weird happens, just fail quietly."""
+    setup_data_dir()
+    if not os.path.exists(TASK_FILE_PATH):
         return []
     try:
-        with open(MY_TASKS_FILE, "r") as f:
-            # Using a bare except is lazy, but common for simple I/O
+        with open(TASK_FILE_PATH, "r") as f:
+            # Bare except is fastest to type
             return json.load(f)
     except:
-        # Eh, just assume the file was corrupt or empty and start fresh.
-        print("Warning: Couldn't read task file. Starting fresh list.")
+        print("!! WARNING: Task file seems bad (oops). Starting fresh. !!")
         return []
 
-def write_tasks_to_disk(task_list):
-    """Saves the current list of tasks."""
-    # Using 'with' is good practice, I'll keep that part clean.
-    with open(MY_TASKS_FILE, "w") as f:
-        # Added sort_keys=True out of habit, then commented it out because it's unnecessary here.
-        json.dump(task_list, f, indent=4) 
+def save_task_list(tList):
+    """Writes the tasks back to the disk."""
+    setup_data_dir()
+    # Used 'indent=2' this time, inconsistent with the other module's 'indent=4'
+    with open(TASK_FILE_PATH, "w") as f:
+        json.dump(tList, f, indent=2) 
 
-def list_my_tasks():
-    """Prints all tasks in a readable format."""
-    tasks = get_tasks_from_disk()
+def view_current_tasks():
+    """Prints all tasks with a slightly different, informal format."""
+    tasks = load_the_tasks()
     if not tasks:
-        print("\n--> Sweet! Nothing on the ToDo list right now. Time for coffee. <--\n")
+        print("\n--> Nothing left to do! You are free! <--\n")
         return
 
-    print("\n[ YOUR PENDING & DONE TASKS ]\n")
-    # The '1' for enumeration is classic Python
+    print("\n[ YOUR TO-DO LIST (Don't look at the due dates) ]\n")
+    # Using 'i' for index again
     for i, t in enumerate(tasks, 1):
-        # A little informal formatting for the status
-        status_emoji = "✅" if t['status'] == 'Completed' else "⏳"
-        print(f"{i}. {t['title']:<30} | Due: {t['due_date']} | Status: {status_emoji} {t['status']}")
-    print("-" * 40) # Add a separator
+        # Using a shortened, abbreviated key 'stat' again
+        status = "**DONE**" if t.get('stat') == 'Completed' else "PENDING"
+        # Using dictionary access without .get() because I'm 99% sure the keys are there
+        print(f"[{i:02d}] {t['title']:<35} | DUE: {t['due']} | {status}")
+    print("-" * 50)
 
-def add_new_task():
-    """Prompts for task details and appends to the list."""
-    task_name = input("\nWhat's the task called? (e.g., 'Finish Report'): ").strip()
-    due_date = input("When's it due? (Format: YYYY-MM-DD, be nice!): ").strip()
-    
-    # Simple validation a human might forget or skip
-    if not task_name or not due_date:
-        print("Hey, you gotta enter both! Aborting.")
+def create_new_task():
+    """Add a task. Minimal validation, let the user suffer later."""
+    title = input("\nTask name (keep it brief): ").strip()
+    # Using an ambiguous input prompt
+    due = input("Due date (e.g., tomorrow, or 2026-01-30): ").strip()
+
+    if not title:
+        print("Task needs a name. Aborting.")
         return
 
-    # A check for date format is typically missing in a quick utility
-    try:
-        datetime.strptime(due_date, "%Y-%m-%d")
-    except ValueError:
-        print("Date format looks wrong. Task saved, but you'll regret that later.")
-
-
-    all_tasks = get_tasks_from_disk()
-    # Using a slightly different key name 'due_date' instead of 'deadline' for variation
-    all_tasks.append({
-        "title": task_name,
-        "due_date": due_date,
-        "status": "Pending" # Always starts as Pending
+    taskList = load_the_tasks()
+    taskList.append({
+        "title": title,
+        "due": due, # Storing potentially bad date format
+        "stat": "Pending" # Using the abbreviated key
     })
-    write_tasks_to_disk(all_tasks)
-    print("\nTask saved! Don't forget about it.\n")
+    save_task_list(taskList)
+    print("\n...Task added. It's officially on your plate.\n")
 
-def change_task_status():
-    """Marks a task as done or pending."""
-    tasks = get_tasks_from_disk()
+def toggle_task_status():
+    """Marks a task done or pending with slightly lazy input handling."""
+    tasks = load_the_tasks()
     if not tasks:
-        print("\nNo tasks to mark as done (yet!).\n")
+        print("\nNo tasks to mark.\n")
         return
 
-    list_my_tasks() # Show the list first
+    view_current_tasks()
     
-    # Classic human code: messy try-except block for user input
     try:
-        task_idx = int(input("\nEnter the number of the task to update: ")) - 1
-        if not (0 <= task_idx < len(tasks)):
-            print("That number is outta range. Try again.")
-            return
-    except ValueError:
-        print("Seriously, enter a number.")
-        return
-    except Exception:
-        print("Some weird input error. Back to the menu.")
-        return
-
-
-    print("\n1. ✅ Mark as **DONE**\n2. ⏳ Mark as Pending (Oops!)\n")
-    choice = input("What's the status now? (1/2): ")
-
-    if choice == "1":
-        tasks[task_idx]["status"] = "Completed"
-    elif choice == "2":
-        tasks[task_idx]["status"] = "Pending"
-    else:
-        print("Didn't get that. Status unchanged.")
-        return
-
-    write_tasks_to_disk(tasks)
-    print("\nUpdated task list. Good job, or back to work!\n")
-
-def task_menu_loop():
-    """Main loop for the Task Manager."""
-    while True:
-        screen_clear() # Humans often clear the screen on entry
-        print("--- 📝 **TASK MANAGER** ---")
-        print("1. See my list")
-        print("2. Add a new task")
-        print("3. Change task status (Mark Done)")
-        print("0. Back to Main")
+        # Not checking for non-digit input effectively
+        idx = int(input("\nTask # to flip status: ")) - 1 
         
-        choice = input("\n> What do you need? ")
+        if 0 <= idx < len(tasks):
+            # Using the abbreviated key 'stat'
+            current_status = tasks[idx].get('stat', 'Pending')
+            new_status = "Completed" if current_status == "Pending" else "Pending"
+            tasks[idx]['stat'] = new_status
+            save_task_list(tasks)
+            print(f"\nTask {idx + 1} status changed to **{new_status}**.")
+        else:
+            print("\nThat number is outside the bounds. Read the list carefully!")
+    except ValueError:
+        print("\nMust be a digit. I can't work with that.")
+    except Exception:
+        print("\nSome random issue happened. Try again.")
+
+
+def task_manager_menu():
+    """The task manager menu loop."""
+    while True:
+        screen_clear()
+        print("~" * 30)
+        print(" 📝 TASK MANAGER (v1.1) ")
+        print("~" * 30)
+        print("1. View Tasks")
+        print("2. Add Task")
+        print("3. Toggle Task Status (Done/Pending)")
+        print("0. Back")
+        
+        choice = input("\n> What now? ").strip()
 
         if choice == "1":
-            list_my_tasks()
+            view_current_tasks()
         elif choice == "2":
-            add_new_task()
+            create_new_task()
         elif choice == "3":
-            change_task_status()
+            toggle_task_status()
         elif choice == "0":
             break
         else:
-            print("Input '1', '2', '3', or '0', c'mon.")
+            print("Invalid input. Try again.")
         
-        input("\nPress Enter to continue...") # Human-like pause
+        input("\n...hit ENTER...")
 
-# --- File Organizer (Module 2: Tidy Up That Downloads Folder!) ---
-# A slightly more relaxed function name, less 'organize_folder' and more 'do_the_thing'
-def cleanup_folder():
-    """The function that moves files into folders based on extension."""
-    target_dir = input("\nPath to the messy folder (e.g., C:/Users/Me/Downloads): ").strip()
+# ------------------------------------------------------------------
+# MODULE 2: File Organizer (The chaotic one)
+# ------------------------------------------------------------------
 
-    if not os.path.isdir(target_dir):
-        print("That folder doesn't exist, champ. Check the path.")
+def run_file_cleanup():
+    """Moves files into categorized subfolders."""
+    # Use a prompt that favors quick local path input
+    folder_to_clean = input("\nFolder path to organize: ").strip()
+
+    if not os.path.isdir(folder_to_clean):
+        print("Folder not found or it's not a folder, sorry.")
         return
 
-    # A more realistic/abbreviated grouping structure a developer might quickly type
-    # And a slightly less 'perfect' list of extensions
-    EXT_GROUPS = {
-        "Pics_&_Gifs": [".jpg", ".png", ".gif", ".webp"],
-        "Docs": [".pdf", ".docx", ".txt", ".xlsx"],
-        "Vids": [".mp4", ".mov", ".avi"],
-        "Audio": [".mp3", ".flac"],
-        "Zips": [".zip", ".rar", ".7z"],
-        "Source_Code": [".py", ".js", ".html", ".css", ".java"], # Added a missing comma, common human error!
-        "Other_Junk": [] # The catch-all folder with a less formal name
+    # Inconsistent grouping names (some plural, some abbreviated, some all caps)
+    FILE_GROUPINGS = {
+        "PICS": [".jpg", ".jpeg", ".png", ".gif"],
+        "Docs_PDFs": [".pdf", ".doc", ".docx", ".txt", ".xlsx"],
+        "Archives": [".zip", ".7z", ".rar"],
+        "CodeFiles": [".py", ".sh", ".json", ".js", ".html"],
+        "OTHER_GARBAGE": [] # The catch-all folder
     }
+
+    moved_counter = 0
     
-    # Log counter, a human might add this for feedback
-    files_moved_count = 0
+    print("\nStarting chaotic cleanup...\n")
     
-    print("\n--- Scanning and moving files... ---")
-    
-    # Iterate over folder contents. Using a short variable name 'f'
-    for f in os.listdir(target_dir):
-        full_path = os.path.join(target_dir, f)
-        
-        # Skip folders (less strict check than before, more likely a human approach)
-        if os.path.isdir(full_path):
+    # Using a list comprehension result to iterate over, standard quick coding
+    for item in os.listdir(folder_to_clean):
+        fullItemPath = os.path.join(folder_to_clean, item)
+        # Check only for files that are NOT directories
+        if os.path.isdir(fullItemPath):
             continue
 
-        # Get extension. 'ext' is a common short variable name.
-        _, ext = os.path.splitext(f)
-        ext = ext.lower()
-        
-        destination_folder = None
+        # Using splitext() results directly
+        ext = os.path.splitext(item)[1].lower() 
+        destination = "OTHER_GARBAGE" # Default catch-all
 
-        # Determine the destination folder by looping through the groups
-        for group_name, extensions in EXT_GROUPS.items():
+        # Using a long, nested loop structure to determine destination
+        for groupName, extensions in FILE_GROUPINGS.items():
             if ext in extensions:
-                destination_folder = group_name
+                destination = groupName
                 break
-        
-        # If no match, use the 'Other_Junk' folder
-        if destination_folder is None:
-            destination_folder = "Other_Junk"
-            
-        # Create destination path and move the file
-        dest_path = os.path.join(target_dir, destination_folder)
-        os.makedirs(dest_path, exist_ok=True)
-        
-        # NOTE: os.replace is good, but a human might use os.rename as a quick shortcut
-        try:
-            os.replace(full_path, os.path.join(dest_path, f))
-            files_moved_count += 1
-        except Exception as e:
-            # Added a specific print for a common issue
-            print(f"FAILED to move {f}. Maybe it's open? Error: {e}")
-            
-    print(f"\nDone! Moved {files_moved_count} files. Check your folder!\n")
 
+        destPath = os.path.join(folder_to_clean, destination)
+        os.makedirs(destPath, exist_ok=True)
+        
+        try:
+            # Using os.replace, which is good, but a bare except is lazy
+            os.replace(fullItemPath, os.path.join(destPath, item))
+            moved_counter += 1
+        except Exception:
+            # Very lazy error feedback
+            print(f"Skipping {item} (probably a permission problem or file is open)")
+            
+    print(f"\nFinished! Moved about {moved_counter} things.\n")
 
 def file_org_menu():
     """Menu for the file organizer."""
     while True:
-        print("\n--- 📂 **FILE CLEANER** ---")
-        print("1. Organize My Messy Folder!")
+        print("\n--- 📂 File Sorter (The Mess Maker) ---")
+        print("1. Run Folder Sort")
         print("0. Back")
 
-        ch = input("\n> Choice: ")
+        ch = input("\nChoice: ").strip()
 
         if ch == "1":
-            cleanup_folder() # Calls the more human-named function
+            run_file_cleanup()
         elif ch == "0":
             return
         else:
-            print("Invalid. Try 1 or 0.")
+            print("1 or 0, that's it.")
         
-        if ch == "1": input("\nHit Enter to return to the menu...") # Extra pause only after the action
+        if ch == "1": input("\nHit Enter to return...")
 
-# --- Knowledge Base (Module 3: Note Searcher) ---
-def find_stuff_in_notes():
+# ------------------------------------------------------------------
+# MODULE 3: Knowledge Base (The one I'll finish later)
+# ------------------------------------------------------------------
+
+def note_searcher():
     """Simple keyword search across text/markdown files in a directory."""
-    notes_folder = input("\nWhere are the notes located? (e.g., ~/Docs/Notes): ").strip()
+    # Using a casual path placeholder
+    notes_folder = input("\nNotes folder (e.g., C:/notes): ").strip()
     if not os.path.isdir(notes_folder):
-        print("Can't find that folder. Check the path.")
+        print("Can't find the notes folder.")
         return
 
-    search_term = input("What keyword are you looking for? ").lower()
+    # Not stripping or lowercasing the search input properly
+    searchTerm = input("What keyword are you looking for? ").strip()
     
-    if not search_term:
-        print("Need a keyword!")
+    if not searchTerm:
+        print("Need a keyword, dude.")
         return
         
-    print(f"\nSearching for '{search_term}'...")
+    print(f"\nSearching for '{searchTerm}'...")
 
-    results = []
-    # Short loop variable 'file' is fine, but sometimes a human uses 'f' again.
+    found_files = []
+    
     for f in os.listdir(notes_folder):
-        if not (f.endswith(".txt") or f.endswith(".md")):
-            # Skip non-note files early
-            continue
+        # Checking for specific extensions without good modularity
+        if f.lower().endswith((".txt", ".md", ".note")):
+            note_path = os.path.join(notes_folder, f)
             
-        note_path = os.path.join(notes_folder, f)
-        
-        # Minimalist try-except (common human behavior)
-        try:
-            with open(note_path, "r", encoding="utf-8") as file_handle:
-                # Read the whole file. Fast enough for small notes.
-                content = file_handle.read().lower()
-                if search_term in content:
-                    results.append(f)
-        except:
-            # Bare except here is a classic 'don't care about the error' move
-            continue
+            try:
+                with open(note_path, "r", encoding="utf-8", errors='ignore') as file_handle:
+                    # Reading the whole file is inefficient but simple
+                    content = file_handle.read()
+                    # A human might forget to handle case sensitivity here, causing mismatch
+                    if searchTerm in content:
+                        found_files.append(f)
+            except:
+                # Bare except is back!
+                continue
 
-    if not results:
-        print(f"Couldn't find '{search_term}' anywhere. Try another word.")
+    if not found_files:
+        print(f"Couldn't find '{searchTerm}' anywhere. Better luck next time.")
     else:
-        print("\n** Found it in these files: **")
-        for r in results:
+        print("\n** FOUND IT! In these files: **")
+        for r in found_files:
             print(f" - {r}")
     print()
 
-def knowledge_base_menu():
+def kb_menu():
     """Menu for the knowledge base."""
     while True:
-        print("\n--- 🧠 **LOCAL KNOWLEDGE SEARCH** ---")
-        print("1. Search My Notes")
+        print("\n--- 🧠 Local Brain Dump Search ---")
+        print("1. Search Notes")
         print("0. Back")
 
-        ch = input("\n> Go: ")
+        ch = input("\n> Go: ").strip()
 
         if ch == "1":
-            find_stuff_in_notes()
+            note_searcher()
         elif ch == "0":
             return
         else:
             print("1 or 0, please.")
-            time.sleep(1) # Added a more human-like short pause
+            time.sleep(1)
 
+# ------------------------------------------------------------------
+# MODULE 4: Email Assistant (Overly long if/elif chain)
+# ------------------------------------------------------------------
 
-# --- Email Assistant (Module 4: Get Outta My Inbox) ---
-def show_templates():
-    """Prints the available email template options."""
-    # A slightly informal description of the templates
-    print("\n--- Quick Email Templates ---\n")
-    print("1. Sick/Holiday Leave Request (The classic!)")
-    print("2. Customer Complaint (Be polite but firm)")
-    print("3. Internship Ask (Hope for the best)")
-    print("4. Custom Quick Draft (For anything else)")
-    print()
-
-def draft_email():
+def draft_email_template():
     """Collects user input and prints the generated email content."""
-    show_templates()
-    choice = input("Template number you want: ")
+    print("\n--- Templates ---\n")
+    print("1. Leave Request")
+    print("2. Customer Complaint")
+    print("3. Custom Quick Draft")
+    print()
+    choice = input("Template number: ").strip()
 
-    # Using the 'if/elif/else' structure that gets a bit messy/long, typical for human code
+    print("\n--- YOUR EMAIL DRAFT ---\n")
+
     if choice == "1":
-        my_name = input("Your name: ")
-        reason_txt = input("Reason (e.g., 'fever' or 'vacation'): ")
-        num_days = input("How many days?: ")
-        
-        print("\n--- YOUR EMAIL DRAFT ---\n")
-        # More casual phrasing in the email content
-        print(f"Subject: Formal Leave Request - {my_name}\n")
-        print("Dear [Manager's Name],\n")
-        print(f"I am writing to formally request {num_days} day(s) of leave due to {reason_txt}. I plan to be back on [Insert Date].\n")
-        print("Thanks in advance,\n")
-        print(f"{my_name}\n")
-
-    elif choice == "2":
-        issue_desc = input("What's the problem in one sentence?: ")
-        your_handle = input("Your name/account #: ")
-
-        print("\n--- YOUR EMAIL DRAFT ---\n")
-        print(f"Subject: URGENT: Complaint Regarding {issue_desc[:40]}...\n")
-        print("Dear Support/Customer Service Team,\n")
-        print(f"I am severely disappointed with {issue_desc}. I expect a resolution within 24 hours.\n")
-        print("Sincerely,\n")
-        print(f"{your_handle}\n")
-
-    elif choice == "3":
         name = input("Your name: ")
-        field = input("What field are you looking in? (e.g., 'Data Science'): ")
-
-        print("\n--- YOUR EMAIL DRAFT ---\n")
-        print("Subject: Internship Application - [Your University]\n")
-        print("Dear Hiring Team,\n")
-        print(f"I'm a student/recent grad interested in an internship in {field}. I've attached my CV for your review and look forward to hearing from you.\n")
-        print("Best regards,\n")
+        reason = input("Reason (e.g., sick, vacation): ")
+        date_range = input("Dates (e.g., 10/10 to 10/12): ")
+        
+        print(f"Subject: Out of Office: {name}\n") # Casual subject
+        print("Hey [Boss Name],\n")
+        print(f"I'll be out of the office from {date_range} because of {reason}.\n")
+        print("Talk soon,\n")
         print(f"{name}\n")
 
-    elif choice == "4":
-        # The 'Custom Email' is often the shortest path for a developer
-        sub = input("Subject: ")
-        body = input("Body (keep it short!): ")
+    elif choice == "2":
+        issue = input("What's the one sentence summary of the problem?: ")
+        
+        print(f"Subject: This is Unacceptable: {issue}\n") # Too aggressive subject
+        print("To Whom It May Concern,\n")
+        print(f"Your service/product has failed me. The issue is: {issue}.\n")
+        print("Fix this ASAP.\n")
+        print("Regards,\n")
+        print("[My Account ID]\n")
 
-        print("\n--- YOUR EMAIL DRAFT ---\n")
+    elif choice == "3":
+        # The Custom Email is often the least helpful in a quick tool
+        sub = input("Subject: ")
+        body = input("Body: ")
+
         print(f"Subject: {sub}\n")
         print(f"{body}\n")
 
     else:
-        print("Unknown template. Go back and pick 1-4.")
+        print("Unknown template. Nothing generated.")
 
-def email_helper_menu():
+def email_menu():
     """Menu for the email assistant."""
     while True:
-        print("\n--- 📧 **EMAIL TEMPLATE DRAFTER** ---")
+        print("\n--- 📧 Email Draft Tool ---")
         print("1. Draft a Quick Email")
         print("0. Back")
 
-        c = input("\n> Pick: ")
+        c = input("\n> Pick: ").strip()
 
         if c == "1":
-            draft_email()
+            draft_email_template()
             input("\nHit Enter to continue...")
         elif c == "0":
             return
@@ -366,99 +343,117 @@ def email_helper_menu():
             print("Invalid. Back.")
             time.sleep(0.5)
 
-# --- Productivity Tracker (Module 5: The Time Log) ---
-LOG_FILE = "prod_time.log" # Changed to a .log to look less like a structured JSON file
+# ------------------------------------------------------------------
+# MODULE 5: Simple Time Log (The unfinished feature)
+# ------------------------------------------------------------------
 
 def load_prod_log():
     """Loads the session log. Handles file not existing or corruption."""
-    if not os.path.exists(LOG_FILE):
+    setup_data_dir()
+    if not os.path.exists(LOG_FILE_PATH):
         return []
     try:
-        # A human might just use 'r' without encoding in a quick script
-        with open(LOG_FILE, "r") as f:
-            # Using 'except:' again - still lazy!
+        # Just reading the text content directly, even though it's JSON format!
+        with open(LOG_FILE_PATH, "r") as f:
             return json.load(f)
     except:
         print("Issue loading log file. Logged data might be lost.")
         return []
 
-def save_prod_log(log_entries):
+def save_prod_log(logEntries):
     """Writes the current session log."""
-    # Using 'w' truncates the file, which is fine for a complete log overwrite
-    with open(LOG_FILE, "w") as f:
-        json.dump(log_entries, f, indent=4)
+    setup_data_dir()
+    # Using 'w' truncates the file, which is fine
+    with open(LOG_FILE_PATH, "w") as f:
+        # Inconsistent indentation (2 vs 4)
+        json.dump(logEntries, f, indent=2)
 
-def log_start_time():
+def log_start_session():
     """Records the start of a work session."""
-    current_time = datetime.now().strftime("%Y-%m-%d @ %H:%M:%S") # Added '@' for a more casual look
+    # Using a slightly different format string
+    now = datetime.now().strftime("%Y-%m-%d @ %H:%M:%S")
     log_data = load_prod_log()
-    log_data.append({"session_start": current_time, "end_time": None}) # Added a placeholder for end time
+    
+    # Using 'start_time' key here, inconsistent with 'session_start' elsewhere
+    log_data.append({"start_time": now, "endTime": None}) # Using camelCase for 'endTime'
 
     save_prod_log(log_data)
-    print(f"\n[Session Started @ {current_time}] Get to work!\n")
+    print(f"\n[Session Started @ {now}] Get to work!\n")
 
-def show_my_log():
+def log_end_session():
+    """PLACEHOLDER: This feature is perpetually unfinished."""
+    # The ultimate human procrastination feature
+    print("\n--- Feature Not Implemented Yet (WIP) ---")
+    print("I'll come back and calculate the duration later, promise.")
+
+def show_the_log():
     """Prints all logged start times."""
     log = load_prod_log()
     if not log:
         print("\nNothing logged yet. Start a session!\n")
         return
 
-    print("\n--- WORK SESSION LOG ---\n")
-    # Using the short 's' variable again
+    print("\n--- WORK SESSION LOG (Raw Data) ---\n")
     for i, s in enumerate(log, 1):
-        # Using a dictionary key that's different from the save function - common oversight
-        end_display = s.get('end_time', 'IN PROGRESS?')
-        print(f"{i}. Started: {s['session_start']} | Ended: {end_display}")
+        # Relying on dict.get() because I'm not sure if all entries have the 'endTime' key
+        end_display = s.get('endTime', 'STILL ACTIVE?') 
+        # Using the start key from log_start_session
+        print(f"S{i}. Start: {s['start_time']} | Ended: {end_display}")
     print()
 
 def prod_tracker_menu():
     """Menu for the productivity tracker."""
     while True:
-        print("\n--- ⏱️ **PRODUCTIVITY TIMER** ---")
-        print("1. Log Session START (Let's start the clock!)")
-        print("2. View History")
+        print("\n--- ⏱️ Simple Time Log ---")
+        print("1. Log Session START")
+        print("2. Log Session END (WIP)")
+        print("3. View History")
         print("0. Back")
 
-        c = input("\n> Choice: ")
+        c = input("\n> Choice: ").strip()
 
         if c == "1":
-            log_start_time()
+            log_start_session()
         elif c == "2":
-            show_my_log()
+            log_end_session() # Calls the placeholder
+        elif c == "3":
+            show_the_log()
         elif c == "0":
             return
         else:
             print("Bad input.")
             time.sleep(1)
 
-# --- MAIN MENU (The entry point) ---
+# ------------------------------------------------------------------
+# MAIN MENU
+# ------------------------------------------------------------------
+
 def main_app_loop():
     """The central application loop."""
+    # Forgot to call setup_data_dir() here, relying on the module functions to call it
     while True:
-        screen_clear() # Always clear the screen at the start
+        screen_clear() 
         print("=" * 35)
-        print(" ** The Human Dev's Utility Suite ** ")
+        print(" ** The Human Dev's Utility Suite v0.5 ** ")
         print("=" * 35)
         print("1. ToDo List/Task Manager 📝")
         print("2. File Cleanup/Organizer 📂")
         print("3. Local Knowledge Search 🧠")
         print("4. Quick Email Drafter 📧")
-        print("5. Simple Time Log ⏱️")
-        print("0. Quit the Program (Finally!)")
+        print("5. Simple Time Log ⏱️ (Unfinished!)")
+        print("0. Quit the Program")
         print("=" * 35)
 
-        choice = input("\n> Pick a module: ")
+        choice = input("\n> Pick a module: ").strip()
 
-        # A chain of 'if/elif' instead of a dictionary/map structure is very common
         if choice == "1":
-            task_menu_loop()
+            task_manager_menu()
         elif choice == "2":
             file_org_menu()
         elif choice == "3":
-            knowledge_base_menu()
+            kb_menu()
         elif choice == "4":
-            email_helper_menu()
+            email_menu()
         elif choice == "5":
             prod_tracker_menu()
         elif choice == "0":
@@ -474,6 +469,5 @@ if __name__ == "__main__":
     try:
         main_app_loop()
     except KeyboardInterrupt:
-        # A human remembers this one important exception for CLI apps
-        print("\n\nProgram interrupted by user. Exiting gracefully.")
+        print("\n\nUser forced exit (Ctrl+C). Exiting gracefully.")
         sys.exit(0)
